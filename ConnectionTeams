@@ -1,0 +1,124 @@
+﻿using imageReading.Domain.Common;
+using imageReading.Domain.Dtos;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Threading.Tasks;
+
+class ConectionTeams : IConectionTeams
+{
+    private readonly string _webhookUrl;
+    private readonly string _tenantIdGraph;
+    private readonly string _clientIdGraph;
+    private readonly string _clientSecretGraph;
+    private readonly string _resource;
+    private readonly IHttpClientFactory _httpClientFactory;
+    public ConectionTeams(IConfiguration config, IHttpClientFactory httpClientFactory)
+    {
+        _webhookUrl = config["ApiTeam:webhookUrl"];
+        _tenantIdGraph = config["ApiTeam:tenantIdGraph"];
+        _clientIdGraph = config["ApiTeam:clientIdGraph"];
+        _clientSecretGraph= config["ApiTeam:clientSecretGraph"];
+        _resource = config["ApiTeam:resource"];
+        _httpClientFactory = httpClientFactory;
+    }
+    public async Task<Option<string>> CallAsync(IFormFile file, BodyTeamText teamText)
+    {
+        try
+        {
+            using HttpClient client = _httpClientFactory.CreateClient();
+            string base64String;
+            using (var memoryStream = new MemoryStream())
+            {
+                await file.CopyToAsync(memoryStream);
+                var bytes = memoryStream.ToArray();
+                base64String = Convert.ToBase64String(bytes);
+            }
+            var tokenUrl = $"https://login.microsoftonline.com/{_tenantIdGraph}/oauth2/v2.0/token";
+            var tokenData = new StringContent($"grant_type=client_credentials&client_id={_clientIdGraph}&client_secret={_clientSecretGraph}&scope={_resource}/.default", Encoding.UTF8, "application/x-www-form-urlencoded");
+            var formContent = new FormUrlEncodedContent(new[]
+            {
+                    new KeyValuePair<string, string>("scope", $"{_resource}/.default"),
+                    new KeyValuePair<string, string>("client_id", _clientIdGraph),
+                    new KeyValuePair<string, string>("client_secret", _clientSecretGraph),
+                    new KeyValuePair<string, string>("grant_type", "client_credentials")
+            });
+
+            var tokenResponse = await client.PostAsync(tokenUrl, tokenData);
+            var tokenContent = await tokenResponse.Content.ReadAsStringAsync();
+            var accessToken = JsonConvert.DeserializeObject<JObject>(tokenContent)["access_token"].ToString();
+
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            var imageUrl = $"data:image/jpeg;base64,{base64String}";
+
+            string saltodelineaendetalle = "";
+            string[] lines = teamText.Cuerpo.Split('\n');
+            foreach (var line in lines)
+            {
+                saltodelineaendetalle += $@"{{
+                                    ""type"": ""TextBlock"",
+                                    ""text"": ""{line}"",
+                                    ""wrap"": true
+                                }},";
+            }
+
+            var content = new StringContent($@"
+            {{
+                ""type"": ""message"",
+                ""attachments"": [
+                    {{
+                        ""contentType"": ""application/vnd.microsoft.card.adaptive"",
+                        ""content"": 
+                        {{
+                            ""$schema"": ""http://adaptivecards.io/schemas/adaptive-card.json"",
+                            ""type"": ""AdaptiveCard"",
+                            ""body"": [
+                                {{
+                                    ""type"": ""TextBlock"",
+                                    ""text"": ""**{teamText.Titulo}**"",
+                                    ""size"": ""large"",
+                                    ""weight"": ""bolder""
+                                }},
+                                {saltodelineaendetalle}
+                                {{
+                                    ""type"": ""Image"",
+                                    ""url"": ""{imageUrl}"",
+                                    ""size"": ""stretch""
+                                }}
+                            ],
+                            ""$schema"": ""http://adaptivecards.io/schemas/adaptive-card.json"",
+                            ""version"": ""1.3"",
+                            ""minHeight"": ""0"",
+                            ""height"": ""auto""
+                        }}
+                    }}
+                ]
+            }}", Encoding.UTF8, "application/json");
+
+
+            var response = await client.PostAsync(_webhookUrl, content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"Error al enviar el mensaje. Código de estado: {response.StatusCode}");
+                return new Failed<string>($"Error en ConectionTeam: {response.Content}");
+            }
+            Console.WriteLine("Mensaje enviado exitosamente.");
+            return new Success<string>("Mensaje enviado exitosamente.");
+
+        }
+        catch (Exception ex)
+        {
+            return new Failed<string>($"Error en ConectionTeam: {ex}");
+        }
+    }
+}
