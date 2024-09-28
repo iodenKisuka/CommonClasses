@@ -1,5 +1,5 @@
-﻿using imageReading.Domain.Common;
-using imageReading.Domain.Dtos;
+﻿using CommonClass.Domain.Common;
+using CommonClass.Domain.Dtos;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Newtonsoft.Json;
@@ -11,6 +11,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Tasks;
+
 
 class ConectionTeams : IConectionTeams
 {
